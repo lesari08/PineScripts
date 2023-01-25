@@ -1,0 +1,355 @@
+// Script: Sweep Detection Alerts
+// This script is designed to create alerts when a sweep is detected on a given stock for a given timeframe. 
+// Sweeps are defined as a sudden and significant price movement in one direction that suspicously a halters momentum as price turns around, 
+// which can indicate a buying or selling opportunity assuming other factors hold. The script allows users to customize the alerts by selecting 
+// the type of sweep to be plotted (bear or bull), the timeframe to be used, and the number of bars between sweeps.
+// 
+// Installation
+// Open the Pine Editor in TradingView.
+// Click on the "New Script" button to create a new script.
+// Copy and paste the code from this repository into the Pine Editor.
+// Click on the "Save" button to save the script.
+// Click on the "Run" button to apply the script to the chart.
+// 
+// Inputs
+// The script has several inputs that can be adjusted to customize the behavior of the alerts:
+// 
+// Sweep Timeframe: The timeframe to be used to detect sweeps.
+// Plot Sweeps: Whether to plot bear or bull sweeps on the chart.
+// Max number of bars between sweeps: The maximum number of bars between sweeps to be plotted.
+// Max number of bars between LGC sweeps: The maximum number of bars between LGC sweeps to be plotted.
+// Spike or Le Required: The requirement of spike(strong price movement) or Le (liquidty gap candle whose body is less than 50% of the candle range) to detect sweeps.
+
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © lesari
+
+//@version=5
+indicator("Sweeps", overlay=true, max_lines_count=200)
+
+import lesari/LibLG/202 as LG
+import lesari/LibUtils/83 as utils
+
+
+//--------------------------------------------------------------------------------------------------------------//
+//----------------------------------  STATIC VARIABLES  --------------------------------------------------------//
+//--------------------------------------------------------------------------------------------------------------//
+var CR1 = color.new(color.purple, 100)
+var raidColor = color.purple
+
+
+//--------------------------------------------------------------------------------------------------------------//
+//----------------------------------  FUNCTIONS  ---------------------------------------------------------------//
+//--------------------------------------------------------------------------------------------------------------//
+isInsideBar(int barIdx, bool wicksMustBeInside=true ) =>
+    insideBar = false
+    
+    idx = bar_index - barIdx
+    prevIdx = idx + 1
+
+    if wicksMustBeInside
+        insideBar := high[prevIdx] >= high[idx] and low[prevIdx] <= low[idx]
+    else
+        maxOCprev = math.max(open[prevIdx], close[prevIdx])
+        minOCprev = math.min(open[prevIdx], close[prevIdx])
+        
+        maxOC = math.max(open[idx], close[idx])
+        minOC = math.min(open[idx], close[idx])
+        
+        insideBar := maxOCprev >= maxOC and  minOCprev <= minOC
+    
+    insideBar
+    
+//-------------------------------------------------------------------------------------------------------------//
+// @function getConfirmedSweeps: checks if the previous candle formed a sweep IFFFF the current candle didn't close
+//   below the previous candle. 
+// @param int barsBetweenLgcRaid: specify the min number of candles allowed between an LGC and its raider candle
+// @param int barsBetweenMax: specify the maxinum number of candles allowed between the sweep & swept candle 
+// @returns bool: true if previous candle was a sweep AND the current candle didn't
+inLgcBull(int sweptIdx, float sweepLow, int maxBarsBack=100) =>
+    lgcIdx = 0
+    raiderHigh  = high[sweptIdx]
+    raiderLow   = low[sweptIdx]
+    raiderClose = close[sweptIdx]
+	lowestSeen = 99999999.99 //lowest seen close 
+	startOffset = sweptIdx + 1
+	loopEnd = maxBarsBack + startOffset
+	
+    if sweptIdx != 0
+        for i =startOffset to loopEnd
+            loopHigh = high[i]
+            loopLow  = low[i]
+            loopOpen = open[i]
+                
+            // if we run into a candle whose high is lower than sweep low
+            // exit this function
+            if(loopHigh < sweepLow )
+                break
+            
+            //skip lows if loop saw a lower candle close 
+            if raiderClose < loopLow 
+                continue
+         
+            if loopOpen < lowestSeen
+                lgcHeldLgrLevel = lowestSeen > high[i+1]
+                inLgc = LG.isLgcBull(high[i+1], close[i]) and lgcHeldLgrLevel
+                if inLgc
+                    lgcIdx := i
+                    break
+            
+            lowestSeen := close[i] < lowestSeen? close[i] :lowestSeen
+    
+    lgcIdx
+
+
+//-------------------------------------------------------------------------------------------------------------//
+// @function getConfirmedSweeps: checks if the previous candle formed a sweep IFFFF the current candle didn't close
+// below the previous candle. 
+// @param int barsBetweenLgcRaid: specify the min number of candles allowed between an LGC and its raider candle
+// @param int barsBetweenMax: specify the maxinum number of candles allowed between the sweep & swept candle 
+// @returns bool: true if previous candle was a sweep AND the current candle didn't
+getConfirmedLgcSweepsBull(bool showSweeps, int barsBetweenLgcRaid, int barsBetweenMax, allowLgcSweep) =>
+    bullSweep = false
+    sweptLow = 0.0
+    int time1 = 0, int time2 = 0
+	sweptRelativeIdx = 0
+    swpColor = color.red
+    
+	spikeDown = LG.isLgcBear(low[2], close[1]) or LG.isLgcBear(low[3], close[2]) 
+	leCandle = ((high[1]+low[1])/2 ) < math.min(open[1],close[1])
+	spikeDown := spikeDown 
+	//leCandle = utils.percentOfCandleLowerWick() 
+	//excute if the current candle didn't close below the sweep low
+    if close > low[1]
+        _LOW  = low[1]
+    	_OPEN = open[1]
+    	_CLOSE = close[1]
+    	lowestMinOC = math.min(open[1], close[1])
+    	lowestSeen = 99999999.99
+    	startOffset = 3
+    	loopEnd = barsBetweenMax + startOffset
+    	lgcLoopEnd = barsBetweenLgcRaid + startOffset
+    	
+        for i = 2 to loopEnd
+            // if body runs if i > 2+barsBetween. We defined a min number of bars in between sweeps but we
+            // still want to make sure the bars in between haven't closed below the current candle 
+            // (checked after this if statement)
+            if i >= startOffset
+                loopLow     = low[i]
+                loopLowLft  = low[i+1]
+                loopLowRght = low[i-1]
+                    
+                //if we run into a candle that has a lower low, no sweep
+                if(loopLow < _LOW )
+                    break
+                
+                //skip lows if loop saw a lower candle close 
+                if lowestMinOC < loopLow 
+                    continue
+                    
+                swingLow = utils.isSwingLow(loopLow, loopLowLft, loopLowRght) 
+                raid =  utils.isRaidBull(math.min(_CLOSE, _OPEN), _LOW, loopLow,  allowEqual=true) 
+                
+                sweep = raid and swingLow
+ 
+                //lgc sweep
+                lgcSweep = false
+               
+                if  i <= lgcLoopEnd and allowLgcSweep 
+                    lgcSweep := raid and LG.isLgcBull(high[i+1], close[i]) and lowestSeen > low[i]
+                if lgcSweep
+                    swpColor := color.purple
+                
+                if raid and loopLow == _LOW
+                    swpColor := color.green
+                if  sweep or lgcSweep
+                    sweptRelativeIdx := i
+                    time1 :=  time_close[i]
+    			    time2 := time_close[1]
+    			    sweptLow:= loopLow
+                    break
+                //--
+   
+            minOC = math.min(open[i], close[i])
+            lowestMinOC := minOC < lowestMinOC? minOC : lowestMinOC   
+            lowestSeen := low[i] < lowestSeen? low[i] :lowestSeen
+    [sweptRelativeIdx, sweptRelativeIdx and spikeDown, sweptRelativeIdx and leCandle, swpColor, time1, time2, sweptLow]
+    
+
+ 
+//-------------------------------------------------------------------------------------------------------------//
+// @function getConfirmedSweeps: checks if the previous candle formed a sweep IFFFF the current candle didn't close
+// above the previous candle. 
+// @param int barsBetweenLgcRaid: specify the min number of candles allowed between the sweep & swept candle 
+// @param int barsBetweenMax: specify the maxinum number of candles allowed between the sweep & swept candle 
+// @param bool allowLgcSweep: allow raids of LGCs to be considered sweeps 
+// @returns bool: true if previous candle was a sweep AND the current candle didn't close through
+getConfirmedLgcSweepsBear( bool showSweeps, int barsBetweenLgcRaid, int barsBetweenMax, bool allowLgcSweep) =>
+	sweptRelativeIdx = 0
+	sweptHigh = 0.0
+	int time1 = 0, int time2 = 0
+	swpColor = color.red //changes to purple for LGC sweep
+	
+	spikeUp = LG.isLgcBull(high[2], close[1]) or LG.isLgcBull(high[3], close[2]) 
+	leCandle = ((high[1]+low[1])/2 ) > math.max(open[1],close[1])
+	spikeUp := spikeUp
+	//no need to report confirmed sweep if we close above sweep level
+	if close < high[1]
+        _HIGH  = high[1]
+    	_OPEN = open[1]
+    	_CLOSE = close[1]
+    	//variable is used to avoid pseduo sweeps
+    	highestMaxOC =  math.max(open[1], close[1])
+    	//used to avoid labeling a candle as a raid if it has already been raided
+    	highestSeen =  0.0
+    	//starting at 3 to avoid sweeps of adjacent candles 
+    	startOffset = 3
+    	loopEnd = barsBetweenMax + startOffset
+    	lgcLoopEnd = barsBetweenLgcRaid + startOffset
+    	// starting i at [2] because [1] is the confirmed 
+    	// candle we're calling this method for
+        for i = 2 to loopEnd
+            // if statement runs if i > 2+barsBetween. We defined a min number of bars between but we
+            // want to ensure those bars havent closed below our candle of interest 
+            // (which we checked after this if statement)
+            if i >= startOffset
+                loopHigh     = high[i]
+                loopHighLft  = high[i+1]
+                loopHighRght = high[i-1]
+                
+                //if we run into a candle that has a higer high, no sweep
+                if(loopHigh > _HIGH )
+                    break
+                    
+                //skip highs that have seen higher candle closes 
+                if( loopHigh < highestMaxOC)
+                    continue
+                    
+                swingHigh = utils.isSwingHigh(loopHigh, loopHighLft, loopHighRght) 
+                raid = utils.isRaidBear(math.max(_CLOSE, _OPEN), _HIGH, loopHigh, allowEqual=true)
+                
+                sweep = raid and swingHigh
+                
+                 //lgc sweep
+                lgcSweep = false
+                
+                if  i <= lgcLoopEnd and allowLgcSweep 
+                    lgcSweep := raid and LG.isLgcBear(low[i+1], close[i]) and highestSeen < high[i]
+                
+                if lgcSweep
+                    swpColor := color.purple
+                
+                if raid and loopHigh == _HIGH
+                    swpColor := color.green
+                if sweep or lgcSweep
+                    sweptRelativeIdx := i
+    	            time1 :=  time_close[i]
+    			    time2 := time_close[1]
+    			    sweptHigh := loopHigh
+                    break
+                   
+            maxOC = math.max(open[i], close[i])
+            highestMaxOC := maxOC > highestMaxOC? maxOC : highestMaxOC
+            highestSeen := high[i] > highestSeen? high[i] : highestSeen
+            
+    [sweptRelativeIdx, sweptRelativeIdx and spikeUp, sweptRelativeIdx and leCandle, swpColor, time1, time2, sweptHigh]
+
+
+//-------------------------------------------------------------------------------------------------------------//
+// @function getConfirmedSweeps: function that draws confirmed sweeps
+// @param bool htfCandleChange: if true, HTF produced a new candle. parametert used to avoids unnessecary work
+// @param int numBarsBetween: default ==1, specify the minimum number of candles alhighed between the sweep & swept candle 
+// @returns array string sweepObject
+getConfirmedSweeps(bool withinDates, bool showSweepsBear, bool showSweepsBull,bool showLgcRaidsBear, bool showLgcRaidsBull,
+  int barsBetweenLgcRaid=1, int barsBetweenMax=500,bool spikeorLE, bool spikeRequired, bool leRequired) =>
+    betweenMax = withinDates? barsBetweenMax : 0
+    betweenRaid = withinDates? barsBetweenLgcRaid: 0
+    [bear,spikeUp, leBear, swpColorBr,t1R,t2R, swpHigh] = getConfirmedLgcSweepsBear(showSweepsBear,betweenRaid, betweenMax, showLgcRaidsBear)
+    [bull, spikeDown, leBull, swpColorBl, t1L, t2L, swpLow] = getConfirmedLgcSweepsBull(showSweepsBull,betweenRaid, betweenMax, showLgcRaidsBull)
+    
+    if spikeRequired
+        bear := bear and spikeUp? bear : 0
+        bull := bull and spikeDown? bull : 0
+    if leRequired
+        bear := bear and leBear? bear : 0
+        bull := bull and leBull?bull :0
+    
+    if spikeorLE and not spikeRequired and not leRequired
+        bear := bear and (spikeUp or leBear)? bear : 0
+        bull := bull and (spikeDown or leBull)? bull : 0
+
+    [bear, bull, swpColorBl, swpColorBr, t1R, t2R, t1L, t2L, swpHigh, swpLow]
+ 
+  
+
+//--------------------------------------------------------------------------------------------------------------//
+//-----------------------------------------  USER INPUTS    ----------------------------------------------------//
+//--------------------------------------------------------------------------------------------------------------//
+i_tf = input.timeframe('', "Sweep Timeframe", group="Timeframe")
+grp_plot = "Plot Sweeps"
+i_showSweepsBear = input.bool(defval=true, title = "Plot Bear Sweeps ",group=grp_plot, inline='1')
+i_showSweepsBull = input.bool(defval=true, title = "Plot Bull Sweeps  ", group=grp_plot,inline='2')
+i_showLgcRaidsBear = input.bool(defval=true, title = "Plot LGC Bear Raids",group=grp_plot, inline='1')
+i_showLgcRaidsBull = input.bool(defval=true, title = "Plot LGC Bull Raids",group=grp_plot, inline='2')
+i_barsBetweenMax = input.int(defval=50,title= "Max number of bars between sweeps" ,minval=0, group=grp_plot)
+i_barsBetweenLgcRaid= input.int(defval=20, title= "Max number of bars between LGC sweeps" , minval=0, group=grp_plot)
+
+
+grp_filters = "FILTERS"
+i_spikeorLE = input.bool(false,title= "Spike or Le Required" , group=grp_filters)
+i_spikeRequired = input.bool(false,title= "Spike Required" , group=grp_filters)
+i_leRequired = input.bool(false,title= "LE Required" , group=grp_filters)
+
+grp_testing = "Limit Time Period"
+i_limitTimePeriod = input.bool(false, "Only draw LGs created in a specified range", group=grp_testing)
+i_dateStart = input.time(timestamp("19 Jul 1990 00:00 +0300"), "Start Time", group=grp_testing)
+i_dateEnd   = input.time(timestamp("19 Jul 2023 00:00 +0300"), "End Time",group=grp_testing)
+withinDates = not i_limitTimePeriod  or (i_dateStart < time and time < i_dateEnd )
+
+
+
+//--------------------------------------------------------------------------------------------------------------//
+//----------------------------------    MAIN EXECUTION CODE  ---------------------------------------------------//
+//--------------------------------------------------------------------------------------------------------------//
+[sweptIdxBear,sweptIdxBull, swpColorBl, swpColorBr, t1R, t2R, t1L, t2L, swpHigh, swpLow]= 
+  request.security(syminfo.tickerid, i_tf,  getConfirmedSweeps(withinDates, i_showSweepsBear,i_showSweepsBull, i_showLgcRaidsBear, 
+  i_showLgcRaidsBull, i_barsBetweenLgcRaid, i_barsBetweenMax, i_spikeorLE, i_spikeRequired, i_leRequired) )
+
+
+    
+x1Offset = timeframe.in_seconds(timeframe.period) * 1000//1000 for ms
+if i_showSweepsBull and sweptIdxBull and  swpColorBl != raidColor and sweptIdxBull != sweptIdxBull[1]
+    line.new(t1L-x1Offset, swpLow, t2L+ x1Offset, swpLow, color = swpColorBl, width=1, xloc=xloc.bar_time)
+if i_showLgcRaidsBull and sweptIdxBull and swpColorBl == raidColor and sweptIdxBull != sweptIdxBull[1]
+    line.new(t1L-x1Offset, swpLow, t2L+ x1Offset, swpLow, color = swpColorBl, width=1, xloc=xloc.bar_time)
+if i_showSweepsBear and sweptIdxBear and swpColorBr != raidColor and sweptIdxBear != sweptIdxBear[1]
+    line.new(t1R-x1Offset, swpHigh, t2R+ x1Offset, swpHigh, color = swpColorBr, width=1, xloc=xloc.bar_time)    
+if i_showLgcRaidsBear and sweptIdxBear and swpColorBr == raidColor and sweptIdxBear != sweptIdxBear[1]
+    line.new(t1R-x1Offset, swpHigh, t2R+ x1Offset, swpHigh, color = swpColorBr, width=1, xloc=xloc.bar_time)   
+    
+    
+
+//-----ALERTS------------------------
+alertcondition(sweptIdxBear, title = "Bearish Sweep", message = "Bearish Sweep {{exchange}}:{{ticker}}")
+alertcondition(sweptIdxBull, title = "Bullish Sweep", message = "Bullish Sweep {{exchange}}:{{ticker}}")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
