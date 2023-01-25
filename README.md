@@ -9,9 +9,14 @@ This repository contains a collection of individual PineScript indicators that c
 5. Click on the "Run" button to apply the indicator to the chart.
 ## Indicators
 The following indicators are included in this repository:
-
-- Liquidity Gap Indicator: This indicator renders buy and sell liquidity gaps for a given stock ticker. 
-- Sweep Indicator: This indicator sends alerts when 
+- **Liquidity Gap Indicator**:
+![LGI](https://www.tradingview.com/x/Hzt39f1C/)
+ The Liqudity Gap indicator renders buyside and sell side liquidity gaps for a given stock ticker. 
+ 
+ 
+- **Sweep Indicator**: 
+- ![LGI](https://www.tradingview.com/x/M45Pm2yW/)
+- The Sweep indicator sends alerts when 
     1) prices goes above a signifcant swing high but not does close above that significant high on a given timeframe 
     2) price falls below a signifcant swing low but does not close below that signifcant low on a given timeframe
 ## Customization
@@ -24,7 +29,7 @@ Please note that these indicators are provided for educational and informational
 If you have any suggestions for new indicators or improvements to existing indicators, please open an issue or submit a pull request.
 
 ## License
-None
+Source code within this project is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 
 
 ## Contact
