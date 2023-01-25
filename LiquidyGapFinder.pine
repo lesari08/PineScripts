@@ -1,0 +1,377 @@
+// This script renders liquidity gap for a given stock ticker. 
+// Script Outline:
+// The execution code uses two arrays, one for bear gaps and one for bull gaps, to store the start, equilibrium and 
+// fill prices of the gaps. The script then uses the htfSelected variable to determine the user-selected timeframe, 
+// and the withinDates variable to determine if the current bar is within that timeframe. The script then calls the 
+// drawGapsBull and drawGapsBear functions,  passing in various parameters such as the current bar index, whether to
+//  show filled gaps, the colors for the gaps, and the transparency level. These functions then draw the gaps on the chart. 
+// Finally, the script creates a label displaying the "LG Finder" and the selected timeframe, with an error message in 
+// case the selected timeframe is lower than the chart timeframe.
+
+
+//@version=5
+indicator('Gap Finder', shorttitle='Gaps', overlay = true, max_lines_count = 500, max_boxes_count = 500, linktoseries=true)
+
+//-----------------------------------------------------------------------------------------------------------//
+//------------------------------------------- IMPORT STATEMENTS----------------------------------------------//
+//-----------------------------------------------------------------------------------------------------------//
+import lesari/LibDataStructures/2 as ds
+import lesari/LibLG/202 as LG
+import lesari/LibLineUtils/8  as lineUtils
+import lesari/LibUtils/55 as utils
+
+
+
+//-----------------------------------------------------------------------------------------------------------//
+//------------------------------------------- STATIC VARIABLES ----------------------------------------------//
+//-----------------------------------------------------------------------------------------------------------//
+var TH1 = "CHRISTMAS", var TH2 = "BLACK & WHITE", var TH3 = "COOL GRAY",var TH4 =  "SNOW", TH5="PURPLE & BLUE", TH6="REVERSE CHRISTMMAS", TH7="BLUE & PURPLE"
+var REP1 = "LG", var REP2 = "LG + EQ", var REP3 = "FILL LINE"
+var TICKER = syminfo.tickerid
+var DARK_RED = #990000
+var GRAY = color.gray
+var DARK_BLUE = color.new(#004c99,70)
+var PURPLE = #AD529C
+var DARK_GREEN = #305E02
+var WHITE = color.white 
+var BLUE1 = #3783CE
+
+
+//-----------------------------------------------------------------------------------------------------------//
+//-----------------------------------------------  FUNCTIONS ------------------------------------------------//
+//-----------------------------------------------------------------------------------------------------------//
+
+// @function f_safeSecurity: Function to securely and simply call `security()` so that it never repaints and never looks ahead.
+// We make sure that we're never requesting information from a real time HTF bar. 
+// Because we're not accesing a real time HTF bar, its safe to have barmerge.lookahead_on
+// Assumptions: ticker is from current TF
+// @param _res: Timeframe resolution
+// @param _src: the  candle data being requested
+// @returns : NA
+f_safeSecurity(_res, _src) => request.security(TICKER, _res, _src[1], lookahead = barmerge.lookahead_on)
+
+
+// @function f_getThemeColor: Function that returns the colors associated with a requested theme
+// @param _theme: theme being requested
+// @param _bull: if true, the the request is looking for the bull theme colors. 
+//    if false the request is seeking the bear theme colors 
+// @returns color _retValue
+f_getThemeColor(_theme , _bull) =>
+    _retValue = color.black
+    if _bull
+        _retValue := switch _theme
+            TH1 => DARK_GREEN
+            TH2 => WHITE
+            TH3 => GRAY
+            TH4 => color.white
+            TH5 => BLUE1
+            TH6 => DARK_RED
+            TH7 => PURPLE
+    else
+        _retValue := switch _theme
+            TH1 => DARK_RED
+            TH2 => color.black
+            TH3 => GRAY
+            TH4 => WHITE
+            TH5 => PURPLE
+            TH6 => DARK_GREEN
+            TH7 => BLUE1
+    _retValue
+
+
+//{
+//-------------------------------------------------------------------------------------------------------------//    
+// @function drawGapsBull: The function renders the bear LGs for a given timeframe 
+// @param  int lgTfCurrIdx: index of the given timeframes LG
+// @param  bool showLG: True if LGs should be rendered to the screen
+// @param  float hi: high of the lg being drawn (based on selected tf)
+// @param  lowPrev2 : the low of the candle 2 indices away from the current real time bar 
+// @param  color gapFillColor: sets the LG's background color 
+// @param  closeTf:  close price on  selected Tf
+// @param  int gapBeginTime: time that the gap was created (unix time stamp)
+// @param  int gapEndTime: time that the gap was filled or closed (unix time stamp)
+// @param  bool showEQ: when true will render the LG EQ line
+// @param  bool fillGapBckground: when true, will render a background color within the LG
+// @param  bool showFillLineOnly: when true, hides all lines of the LG except the fill ine 
+// @param  bool showFilled: when true, renders filled gaps  
+// @param  bool showFilledNotClosedGaps: true 
+// @param  color bearGapColor: 
+// @param  int i_trans: transparency value 
+// @returns: NA
+//-------------------------------------------------------------------------------------------------------------
+drawGapsBull(int lgTfCurrIdx, bool showLG, float lo, float highPrev2, float closeTf, int gapBeginTime, int gapEndTime,  
+ bool showEQ, bool fillBckground, bool showFillLineOnly, bool showFilled, bool showFilledNotClosedGaps, color bullGapColor, int i_trans
+ ) =>
+   // avoid creating multiple LGs when drawing HTF lgs
+    if showLG and lgTfCurrIdx != lgTfCurrIdx[1]
+    	//unfilled LGs
+    	var line[] startPrices = array.new_line(0)
+    	var line[] eqPrices = array.new_line(0)
+    	var line[] fillPrices = array.new_line(0)
+    	//FilledBull but not closed thru LGs
+    	var line[] startPricesFilled = array.new_line(0)
+    	var line[] eqPricesFilled = array.new_line(0)
+    	var line[] fillPricesFilled = array.new_line(0)
+    	
+        var lineColor  = color.new(bullGapColor, 35)
+        var filledLineColor = color.new(bullGapColor, 50)
+        
+        var gapFillColor  = color.new(bullGapColor, i_trans)
+        var filledLgColor = color.new(bullGapColor,i_trans+15)
+    
+        if LG.isGapBull(lo, highPrev2)
+            LG.pushToLineStack(lo, highPrev2, gapBeginTime, showEQ, fillBckground,showFillLineOnly,false, lineColor, gapFillColor, startPrices, eqPrices, fillPrices)
+
+        //Check to see if 1 (or more) gaps have been filled by the current candle   
+        if not ds.isEmpty(fillPrices)
+			tempStartPriceLine = ds.peek(startPrices)
+            tempFillPriceLine  = ds.peek(fillPrices)
+            tempEqLine         = ds.peek(eqPrices)
+       
+            fillPrice = line.get_y2(tempFillPriceLine)
+            // So loop thru to cover all LGs that have been filled by current candle, since 1 candle can fill multiple LGs
+            while(lo <= fillPrice)
+                LG.popFromLineStack(fillPrices, eqPrices, startPrices)
+                
+                if not showFilled
+                    lineUtils.deleteGap(tempFillPriceLine,tempStartPriceLine, tempEqLine)
+                else
+                    //redraw end of line to current candle
+                    lineUtils.setGapEnd(tempStartPriceLine, tempFillPriceLine,tempEqLine, gapEndTime) 
+                    
+                    // if LG is filled but not closed thru (on the timeframe that we're drawing LGs for)
+                    if showFilledNotClosedGaps
+                        startPrice = line.get_y2(tempStartPriceLine)
+                        LG.pushToLineStack(startPrice,fillPrice,gapEndTime, showEQ, fillBckground, showFillLineOnly, true, filledLineColor,filledLgColor, startPricesFilled, eqPricesFilled, fillPricesFilled)
+                        
+                if(array.size(startPrices) == 0)
+                    break
+     
+				tempStartPriceLine := ds.peek(startPrices)
+				tempFillPriceLine  := ds.peek(fillPrices)
+				tempEqLine         := ds.peek(eqPrices)
+				fillPrice          := line.get_y2(tempFillPriceLine)
+		//End of If
+		
+		//Loop thru the filled LG array starting from the back
+		// to see if the prev candle close, closed thru LG
+		empty = ds.isEmpty(fillPricesFilled)
+		if not empty
+		    size = array.size(startPricesFilled)
+            for i=size-1 to 0
+        	    tempStartLine  = array.get(startPricesFilled,i)
+                tempEqLine     = array.get(eqPricesFilled, i)
+                tempFilledLine = array.get(fillPricesFilled, i)
+           
+                fillPrice = line.get_y2(tempFilledLine)
+    		    // While current candle closed below LG
+                if ( closeTf < fillPrice)
+                    array.remove(startPricesFilled,i)
+                    array.remove(fillPricesFilled, i)
+                    array.remove(eqPricesFilled, i)
+                    
+                    if not showFilled or showFilledNotClosedGaps == false
+                        lineUtils.deleteGap(tempStartLine,tempFilledLine, tempEqLine)
+                    else
+                        lineUtils.setGapEnd(tempStartLine,tempFilledLine, tempEqLine,gapEndTime )   
+//-------------------------------------------------------------------------------------------------------------//  
+
+
+
+
+//-------------------------------------------------------------------------------------------------------------//    
+// @function drawGapsBear: The function renders the bear LGs for a given timeframe 
+// @param  bool showLG: True if LGs should be rendered to the screen
+// @param  float hi: high of the lg being drawn (based on selected tf)
+// @param  lowPrev2 : the low of the candle 2 indices away from the current real time bar 
+// @param  color gapFillColor: sets the LG's background color 
+// @param  closeTf:  close price on  selected Tf
+// @param  int gapBeginTime: time that the gap was created (unix time stamp)
+// @param  int gapEndTime: time that the gap was filled or closed (unix time stamp)
+// @param  bool showEQ: when true will render the LG EQ line
+// @param  bool fillGapBckground: when true, will render a background color within the LG
+// @param  bool showFillLineOnly: when true, hides all lines of the LG except the fill ine 
+// @param  bool showFilled: when true, renders filled gaps  
+// @param  bool showFilledNotClosedGaps: true 
+// @param  color bearGapColor: 
+// @param  int i_trans: transparency value 
+// @returns: NA
+//-------------------------------------------------------------------------------------------------------------
+drawGapsBear(int lgTfCurrIdx, bool showLG, float hi, float lowPrev2, float closeTf,  int gapBeginTime,  int gapEndTime,
+ bool showEQ, bool fillGapBckground, bool showFillLineOnly, bool showFilled, bool showFilledNotClosedGaps, 
+ color bearGapColor, int i_trans
+     ) =>
+     
+   // avoid creating multiple LGs when drawing HTF lgs
+    if showLG and lgTfCurrIdx != lgTfCurrIdx[1]
+        var line[] startPrices= array.new<line>(0)  
+        var line[] eqPrices = array.new<line>(0) 
+        var line[] fillPrices= array.new<line>(0) 
+        var line[] startPricesFilled= array.new<line>(0) 
+        var line[] eqPricesFilled = array.new<line>(0)
+        var line[] fillPricesFilled = array.new<line>(0)
+
+        var color lineColor = color.new(bearGapColor, 35)
+        var color filledLineColor = color.new(bearGapColor, 50)
+        var color gapFillColor= color.new(bearGapColor,  i_trans)
+        var color filledLgColor= color.new(bearGapColor, i_trans+15)
+    
+        if LG.isGapBear(lowPrev2, hi) 
+            startP   = hi
+            fillP    = lowPrev2
+            lgFilled = false
+            LG.pushToLineStack(startP,fillP, gapBeginTime, showEQ, fillGapBckground,showFillLineOnly,lgFilled, lineColor, gapFillColor, startPrices, eqPrices, fillPrices)
+            
+        //Check to see if 1 (or more) gaps have been filled by the current candle   
+        if array.size(fillPrices) > 0
+            tempStartLine = ds.peek(startPrices)
+            tempEqLine    = ds.peek(eqPrices)
+            tempFillLine  = ds.peek(fillPrices)
+            
+            fillPrice = line.get_y2(tempFillLine)
+            // So loop thru to cover all LGs that have been filled by current candle, since 1 candle can fill multiple LGs
+            while(hi >= fillPrice)
+                LG.popFromLineStack(startPrices, eqPrices, fillPrices)
+                
+                if not showFilled
+                    lineUtils.deleteGap(tempStartLine,tempFillLine, tempEqLine)
+                else
+                    //redraw end of line to current candle
+                    lineUtils.setGapEnd(tempFillLine, tempStartLine,tempEqLine, gapEndTime) 
+                    
+                    // if LG is filled but not closed thru (on the timeframe that we're drawing LGs for)
+                    if showFilledNotClosedGaps
+                        startPrice = line.get_y2(tempStartLine)
+                        lgFilled = true
+                        LG.pushToLineStack(startPrice,fillPrice,gapEndTime, showEQ, fillGapBckground, showFillLineOnly, lgFilled, 
+                          filledLineColor,filledLgColor, startPricesFilled, eqPricesFilled, fillPricesFilled)
+                        
+                if(array.size(fillPrices) == 0)
+                    break
+                    
+				tempFillLine := ds.peek(fillPrices)
+				tempStartLine :=ds.peek(startPrices)
+				tempEqLine := ds.peek(eqPrices)
+				
+				fillPrice := line.get_y2(tempFillLine)
+		//End of If
+		
+		//Loop thru the filled LG array starting from the back
+		// to see if the prev candle close, closed thru LG
+		isEmpty = ds.isEmpty(fillPricesFilled)
+		if not isEmpty
+		    size = array.size(fillPricesFilled)
+            for i=size-1 to 0
+        	    tempStartLine  = array.get(startPricesFilled,i)
+                tempEqLine     = array.get(eqPricesFilled, i)
+                tempFilledLine = array.get(fillPricesFilled, i)
+           
+                fillPrice = line.get_y2(tempFilledLine)
+    		    // While current candle closed above LG
+                if ( closeTf > fillPrice)
+                    array.remove(startPricesFilled,i)
+                    array.remove(fillPricesFilled, i)
+                    array.remove(eqPricesFilled, i)
+                    
+                    if not showFilled or not showFilledNotClosedGaps 
+                        lineUtils.deleteGap(tempStartLine,tempEqLine, tempFilledLine)
+                    else
+                        lineUtils.setGapEnd(tempStartLine,tempEqLine,tempFilledLine, gapEndTime )                  
+//------------------------------------------------------------------------------------------------------------// 
+//}
+
+
+//-----------------------------------------------------------------------------------------------------------//
+//------------------------------------------------USER INPUTS------------------------------------------------//
+//-----------------------------------------------------------------------------------------------------------//
+i_htf = input.timeframe('', "Higher Timeframe", group='Timeframe')
+i_autoHtf = input.bool(false, "Automatically Select Charts HTF", group='Timeframe')
+autoHtf = switch timeframe.period
+    '1' => '5'
+    '2' => '15'
+    '5' => '30'
+    '30' => '240'
+    '240' => 'D'
+    'D' => 'W'
+    'W' => 'M'
+    'M' => '3M'
+    '3M' => '12M'
+    => timeframe.period
+    
+actualHtf = i_autoHtf ? autoHtf : i_htf
+
+i_lgRepresentation = input.string(REP2, 'LG Representation',options=[REP1, REP2, REP3],group='LG REPRESENTATION', inline='1')
+showEQ =  i_lgRepresentation == REP2
+showFillLineOnly = i_lgRepresentation == REP3 
+
+g_testing = "Limit Time Period"
+i_limitTimePeriod = input.bool(false, "Only draw LGs created in a specified range", group=g_testing)
+i_dateStart = input.time(timestamp("19 Jul 1990 00:00 +0300"), "Start Time", group=g_testing)
+i_dateEnd   = input.time(timestamp("19 Jul 2023 00:00 +0300"), "End Time",group=g_testing)
+withinDates = not i_limitTimePeriod  or (i_dateStart < time and time < i_dateEnd )
+
+g_bullBear = "BULL/BEAR"
+i_showFilledGaps = input.bool(false, 'Show Filled LGs', group='Filled/UnFilled', inline='1')
+
+i_showGapsBear = input.bool(true, 'Show Bear LGs', group=g_bullBear, inline='1')
+i_showGapsBull = input.bool(true, 'Show Bull LGs', group=g_bullBear, inline='2')
+
+i_showFilledNotClosedGapsBr = input.bool(false, 'Show Filled NOT Closed  (Bear)', group=g_bullBear, inline='1')
+i_showFilledNotClosedGapsBl = input.bool(false, 'Show Filled NOT Closed (Bull)', group=g_bullBear, inline='2')
+
+grpColors = 'Colors & Background'
+i_fillBackground = input.bool(true, 'Fill LG Background', group=grpColors, inline='1')
+i_theme = input.string(TH1,"Color Theme", options=[TH1,TH2,TH3,TH4,TH5,TH6,TH7], group=grpColors, inline='2')
+i_trans = input.int(75, "Unfilled LG Transparency", minval=0, maxval=85)
+i_hideLabel = input.bool(true, "Hide Non-Error Labels", group="Label")
+
+theme = i_autoHtf? TH5 : i_theme
+bullColor = f_getThemeColor(theme, true)
+bearColor = f_getThemeColor(theme, false)
+    
+
+
+//-----------------------------------------------------------------------------------------------------------//
+//---------------------------------- MAIN SCRIPT CODE -------------------------------------------------------//
+//-----------------------------------------------------------------------------------------------------------//
+//bear arrays
+var line[] startPricesBear = array.new_line(0)
+var line[] eqPricesBear = array.new_line(0)
+var line[] fillPricesBear = array.new_line(0)
+//FilledBear but not closed thru LGs
+var line[] startPricesFilledBear = array.new_line(0)
+var line[] eqPricesFilledBear = array.new_line(0)
+var line[] fillPricesFilledBear = array.new_line(0)
+
+
+htfSelected = utils.compareTf(actualHtf) == 1
+
+lo        = htfSelected? f_safeSecurity(actualHtf, low)  : low
+highPrev2 = htfSelected? f_safeSecurity(actualHtf, high[2]) : high[2]
+//for bear gaps
+hi       = htfSelected? f_safeSecurity(actualHtf, high) : high
+lowPrev2 = htfSelected? f_safeSecurity(actualHtf, low[2])  : low[2]
+
+closeTf      = htfSelected? f_safeSecurity(actualHtf, close) : close
+gapBeginTime = htfSelected? f_safeSecurity(actualHtf, time_close) : time_close[2]
+gapEndTime   = htfSelected? f_safeSecurity(actualHtf, time_close) : time_close[1]
+lgTfCurrIdx  = htfSelected? f_safeSecurity(actualHtf, bar_index) : bar_index
+
+// If we're on within the user selected timeframe, set the lg idx as 1
+// drawGapsBull will run if the index is different than the previous 
+lgTfCurrIdx := withinDates? lgTfCurrIdx : 1
+drawGapsBull(lgTfCurrIdx, i_showGapsBull, lo, highPrev2, closeTf, gapBeginTime,gapEndTime, showEQ, i_fillBackground, 
+ showFillLineOnly, i_showFilledGaps,i_showFilledNotClosedGapsBl, bullColor, i_trans) 
+
+drawGapsBear(lgTfCurrIdx, i_showGapsBear, hi, lowPrev2,  closeTf, gapBeginTime,  gapEndTime,  showEQ, i_fillBackground, showFillLineOnly,
+ i_showFilledGaps,i_showFilledNotClosedGapsBr,bearColor, i_trans)
+
+//Labels
+displayedTf = utils.compareTf(actualHtf) != 1 ? timeframe.period : actualHtf
+labelText = "LG Finder\n LG Timeframe: " + displayedTf
+labelTextError = labelText + "\n\n**ERROR**\nSelected Timeframe is lower than chart timeframe. \nPlease select a timeframe greater\nor equal to chart timeframe: "+timeframe.period
+
+var label tfLabel = na
+if not i_hideLabel
+    label.delete(tfLabel[1])
+    tfLabel:= label.new(x=bar_index+5, y=ohlc4, yloc=yloc.price, text=labelText, textcolor=#ffffff, color=color.new(#004C99, 60),style=label.style_label_left, size=size.large)
