@@ -29,7 +29,7 @@ Please note that these indicators are provided for educational and informational
 If you have any suggestions for new indicators or improvements to existing indicators, please open an issue or submit a pull request.
 
 ## License
-None
+Source code within this project is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 
 
 ## Contact
